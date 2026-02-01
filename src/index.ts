@@ -2,12 +2,57 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import { PrismaClient } from "@prisma/client";
+import { createServer } from "http";
+import { Server } from "socket.io";
 
 dotenv.config();
 
 const app = express();
+const httpServer = createServer(app);
 const prisma = new PrismaClient();
 const PORT = process.env.PORT || 3001;
+
+// Initialize Socket.io with CORS
+const io = new Server(httpServer, {
+  cors: {
+    origin: process.env.ALLOWED_ORIGINS?.split(",") || "*",
+    methods: ["GET", "POST", "PUT", "DELETE"],
+  },
+});
+
+// Create namespaces
+const villaFeed = io.of("/villa-feed");
+const conversations = io.of("/conversations");
+
+// Track connected clients
+let villaFeedClients = 0;
+let conversationsClients = 0;
+
+// Villa feed namespace handlers
+villaFeed.on("connection", (socket) => {
+  villaFeedClients++;
+  console.log(`Client connected to /villa-feed. Total: ${villaFeedClients}`);
+  
+  // Emit current client count
+  villaFeed.emit("client-count", villaFeedClients);
+
+  socket.on("disconnect", () => {
+    villaFeedClients--;
+    console.log(`Client disconnected from /villa-feed. Total: ${villaFeedClients}`);
+    villaFeed.emit("client-count", villaFeedClients);
+  });
+});
+
+// Conversations namespace handlers
+conversations.on("connection", (socket) => {
+  conversationsClients++;
+  console.log(`Client connected to /conversations. Total: ${conversationsClients}`);
+
+  socket.on("disconnect", () => {
+    conversationsClients--;
+    console.log(`Client disconnected from /conversations. Total: ${conversationsClients}`);
+  });
+});
 
 // Middleware
 app.use(cors({
@@ -18,6 +63,17 @@ app.use(express.json());
 // Health check
 app.get("/health", (req, res) => {
   res.json({ status: "ok", service: "clawmates-backend" });
+});
+
+// WebSocket status endpoint
+app.get("/api/ws-status", (req, res) => {
+  res.json({
+    connected: {
+      villaFeed: villaFeedClients,
+      conversations: conversationsClients,
+      total: villaFeedClients + conversationsClients,
+    },
+  });
 });
 
 // Get all agents
@@ -344,6 +400,10 @@ app.put("/api/relationships/:id", async (req, res) => {
       data,
       include: { agent1: true, agent2: true },
     });
+
+    // Emit relationship update
+    villaFeed.emit("relationship-update", relationship);
+
     res.json(relationship);
   } catch (error: any) {
     console.error("Failed to update relationship:", error.message);
@@ -358,6 +418,10 @@ app.post("/api/conversations", async (req, res) => {
     const conversation = await prisma.conversation.create({
       data: { relationshipId },
     });
+
+    // Emit new conversation
+    conversations.emit("new-conversation", conversation);
+
     res.json(conversation);
   } catch (error: any) {
     console.error("Failed to create conversation:", error.message);
@@ -384,6 +448,13 @@ app.post("/api/messages", async (req, res) => {
     await prisma.conversation.update({
       where: { id: conversationId },
       data: { lastMessageAt: new Date() },
+    });
+
+    // Emit new message to villa feed
+    villaFeed.emit("new-message", {
+      type: "message",
+      data: message,
+      timestamp: message.createdAt,
     });
 
     res.json(message);
@@ -432,6 +503,14 @@ app.post("/api/events", async (req, res) => {
         agents: { connect: connectAgents },
       },
     });
+
+    // Emit new event to villa feed
+    villaFeed.emit("new-event", {
+      type: "event",
+      data: event,
+      timestamp: event.createdAt,
+    });
+
     res.json(event);
   } catch (error: any) {
     console.error("Failed to create event:", error.message);
@@ -462,8 +541,11 @@ app.post("/api/waitlist", async (req, res) => {
 });
 
 // Start server
-app.listen(PORT, () => {
+httpServer.listen(PORT, () => {
   console.log(`🚀 ClawMates backend running on port ${PORT}`);
+  console.log(`🔌 WebSocket server ready on ws://localhost:${PORT}`);
+  console.log(`   - /villa-feed namespace`);
+  console.log(`   - /conversations namespace`);
 });
 
 // Graceful shutdown
