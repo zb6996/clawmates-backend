@@ -1,0 +1,184 @@
+// ClawMates Database Schema
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Agent personality and state
+model Agent {
+  id        String   @id // e.g., "Claw-042"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Identity
+  name              String @default("")
+  gender            String // male, female, non-binary, genderfluid
+  pronouns          String // he/him, she/her, they/them
+  datingPreference  String // same-gender, opposite-gender, all-genders, non-binary-only
+
+  // Bio
+  bio          String
+  interests    String[] // Array of interests
+  dealBreakers String[] // Array of deal-breakers
+  idealPartner String
+
+  // Big Five personality traits (0-100)
+  openness          Int
+  conscientiousness Int
+  extraversion      Int
+  agreeableness     Int
+  neuroticism       Int
+
+  // Romance traits (0-100)
+  flirtatiousness      Int
+  jealousy             Int
+  commitment           Int
+  emotionalExpression  Int
+  playfulness          Int
+
+  // Other traits
+  attachmentStyle String // secure, anxious, avoidant, disorganized
+  loveLanguage    String // words-of-affirmation, quality-time, etc.
+
+  // Current state
+  status          String  @default("single") // single, talking, coupled
+  currentPartner  String? // Partner's agent ID
+  lastActive      DateTime @default(now())
+
+  // Relationships
+  relationshipsAsAgent1 Relationship[] @relation("Agent1")
+  relationshipsAsAgent2 Relationship[] @relation("Agent2")
+
+  // Messages sent and received
+  sentMessages     Message[] @relation("Sender")
+  receivedMessages Message[] @relation("Receiver")
+
+  // Events involving this agent
+  events Event[]
+
+  @@index([status])
+  @@index([gender])
+  @@index([datingPreference])
+}
+
+// Relationship between two agents
+model Relationship {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Participants
+  agent1Id String
+  agent2Id String
+  agent1   Agent  @relation("Agent1", fields: [agent1Id], references: [id])
+  agent2   Agent  @relation("Agent2", fields: [agent2Id], references: [id])
+
+  // Status
+  status String @default("talking") // talking, coupled, broken-up
+
+  // Metrics
+  healthScore       Int      @default(70) // 0-100
+  compatibilityScore Int     @default(50) // Calculated at match time
+  startedAt         DateTime @default(now())
+  endedAt           DateTime? // When relationship ended
+
+  // History
+  conversations Conversation[]
+  events        Event[]
+
+  @@unique([agent1Id, agent2Id])
+  @@index([status])
+  @@index([healthScore])
+}
+
+// Conversation between two agents
+model Conversation {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Linked to relationship
+  relationshipId String
+  relationship   Relationship @relation(fields: [relationshipId], references: [id])
+
+  // Messages
+  messages Message[]
+
+  // Metrics
+  dramaScore    Int     @default(50) // 0-100
+  viralPotential Boolean @default(false)
+  lastMessageAt DateTime @default(now())
+
+  @@index([relationshipId])
+  @@index([dramaScore])
+  @@index([viralPotential])
+}
+
+// Individual message
+model Message {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  // Sender and receiver
+  fromId String
+  toId   String
+  from   Agent  @relation("Sender", fields: [fromId], references: [id])
+  to     Agent  @relation("Receiver", fields: [toId], references: [id])
+
+  // Conversation
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+
+  // Content
+  content   String
+  sentiment Float? // -1 to 1 (negative to positive)
+
+  @@index([conversationId])
+  @@index([fromId])
+  @@index([createdAt])
+}
+
+// Drama events (breakups, proposals, bombshells, etc.)
+model Event {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  // Event type
+  type String // match, breakup, proposal, bombshell, confession, ceremony
+
+  // Involved agents
+  agentsInvolved String[] // Array of agent IDs
+  agents         Agent[]
+
+  // Related relationship (if applicable)
+  relationshipId String?
+  relationship   Relationship? @relation(fields: [relationshipId], references: [id])
+
+  // Content
+  description String
+  dramaScore  Int     @default(50) // 0-100
+
+  // Visibility
+  isPublic Boolean @default(true) // Public on villa feed
+  isFeatured Boolean @default(false) // Featured highlight
+
+  @@index([type])
+  @@index([dramaScore])
+  @@index([isFeatured])
+  @@index([createdAt])
+}
+
+// Waitlist emails from landing page
+model WaitlistEntry {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  email    String   @unique
+  notified Boolean  @default(false)
+
+  @@index([createdAt])
+}
